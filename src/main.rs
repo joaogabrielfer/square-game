@@ -1,16 +1,21 @@
 use raylib:: prelude::*;
 
-const GRID_SIZE_PX: i32 = 700;
-const SIDEBAR_SIZE_PX: i32 = 200;
-const WINDOW_WIDTH: i32 = GRID_SIZE_PX + SIDEBAR_SIZE_PX;
-const WINDOW_HEIGHT: i32 = GRID_SIZE_PX;
-const CIRCLE_COUNT: i32 = 15;
-const CIRCLE_RADIUS: f32 = 10.0;
-const WIDGETS_PAD: i32 = 20;
+const GRID_SIZE_PX: i32          = 700;
+const SIDEBAR_SIZE_PX: i32       = 200;
+const WINDOW_WIDTH: i32          = GRID_SIZE_PX + SIDEBAR_SIZE_PX;
+const WINDOW_HEIGHT: i32         = GRID_SIZE_PX;
+const CIRCLE_COUNT: i32          = 15;
+const CIRCLE_RADIUS: f32         = 10.0;
+const WIDGETS_PAD: i32           = 20;
+const INLINE_PAD: i32            = 5;
+const PLAYER_COLOR_REC_SIZE: i32 = 20;
+const FONT_SIZE: i32             = 20;
 
 #[derive(Debug, Clone, PartialEq)]
 struct Player {
-    color: (Color, Color)
+    name: String,
+    color: (Color, Color),
+    square_count: usize,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -65,7 +70,7 @@ fn add_square_if_complete(
     x: usize,
     y: usize,
     grid_size: usize,
-    player: Player,
+    player: &mut Player,
 ) {
     if x >= grid_size - 1 || y >= grid_size - 1 {
         return;
@@ -74,7 +79,8 @@ fn add_square_if_complete(
     let already_exists = squares.iter().any(|s| s.x == x && s.y == y);
 
     if !already_exists && square_complete(conns, x, y) {
-        squares.push(Square { x, y, player});
+        squares.push(Square { x, y, player: player.clone()});
+        player.square_count += 1;
     }
 }
 
@@ -122,6 +128,12 @@ fn check_collision_mouse_grid(rl: &RaylibHandle) -> bool {
         Vector2{x: GRID_SIZE_PX as f32, y: GRID_SIZE_PX as f32},
         Vector2{x: 0.0, y: GRID_SIZE_PX as f32},
     ])
+}
+
+fn is_line_taken(lines: &[Line], start: &Circle, end: &Circle) -> bool{
+    lines.iter().any(|l| {
+        (l.start == *start && l.end == *end) || (l.start == *end && l.end == *start)
+    })
 }
 
 fn main() {
@@ -237,10 +249,10 @@ fn main() {
         }
 
         if rl.is_mouse_button_released(MouseButton::MOUSE_BUTTON_LEFT) && let Some(p_idx) = player_turn_idx{
-                let active_player = players[p_idx].clone();
+                let mut active_player = &mut players[p_idx];
                 if let Some(DraggingLine { start, end: Some(end), .. }) = drag_l.take()
                     && are_adjacent(start.clone(), end.clone())
-                        && ! conns.iter().any(|l| *l == Line{start: start.clone(), end: end.clone(), player: active_player.clone()})
+                    && !is_line_taken(&conns, &start, &end)
                 {
                     let new_line = Line {
                         start: start.clone(),
@@ -252,7 +264,7 @@ fn main() {
 
                     player_turn_idx = match player_turn_idx{
                         Some(i) => {
-                            if i == players.len() - 1{
+                            if i == players.clone().len() - 1{
                                 Some(0)
                             } else {
                                 Some(i + 1)
@@ -270,10 +282,10 @@ fn main() {
                         let x = sx.min(ex);
                         let y = sy;
 
-                        add_square_if_complete(&conns, &mut squares, x, y, grid_size, active_player.clone());
+                        add_square_if_complete(&conns, &mut squares, x, y, grid_size, active_player);
 
                         if y > 0 {
-                            add_square_if_complete(&conns, &mut squares, x, y - 1, grid_size, active_player.clone());
+                            add_square_if_complete(&conns, &mut squares, x, y - 1, grid_size, &mut active_player);
                         }
                     }
 
@@ -281,13 +293,13 @@ fn main() {
                         let x = sx;
                         let y = sy.min(ey);
 
-                        add_square_if_complete(&conns, &mut squares, x, y, grid_size, active_player.clone());
+                        add_square_if_complete(&conns, &mut squares, x, y, grid_size, &mut active_player);
 
                         if x > 0 {
-                            add_square_if_complete(&conns, &mut squares, x - 1, y, grid_size, active_player.clone());
+                            add_square_if_complete(&conns, &mut squares, x - 1, y, grid_size, &mut active_player);
                         }
                     }
-                } else if player_turn_idx.is_none() && !check_collision_mouse_grid(&rl){
+                } else if !check_collision_mouse_grid(&rl){
                     drag_l = None;
                 } else {
                     alert_wrong_move.active = true;
@@ -298,6 +310,7 @@ fn main() {
         let mut d = rl.begin_drawing(&thread);
         d.clear_background(Color::WHITE);
 
+        //draw squares
         for s in &squares {
             let top_left = cs[s.x][s.y].pos;
             let bottom_right = cs[s.x + 1][s.y + 1].pos;
@@ -311,6 +324,7 @@ fn main() {
 
             d.draw_rectangle_rec(rect, s.player.color.1);
         }
+        //draw possible circles
         for row in &cs {
             for c in row {
                 let is_adjacent_to_start = drag_l
@@ -327,6 +341,15 @@ fn main() {
             }
         }
 
+
+        //draw circle grid
+        for c in &conns{
+            d.draw_line_ex(c.start.pos, c.end.pos, 3.0, c.player.color.0);
+            d.draw_circle_v(c.start.pos, c.start.r, Color::GRAY);
+            d.draw_circle_v(c.end.pos, c.end.r, Color::GRAY);
+        }
+
+        //draw dragging line
         if let Some(l) = drag_l.clone(){
             d.draw_line_ex(l.start.pos, l.pointer, 5.0, Color::RED);
             d.draw_circle_v(l.start.pos, l.start.r, Color::RED);
@@ -335,15 +358,7 @@ fn main() {
             }
         }
 
-        for c in &conns{
-            d.draw_line_ex(c.start.pos, c.end.pos, 3.0, c.player.color.0);
-            d.draw_circle_v(c.start.pos, c.start.r, Color::GRAY);
-            d.draw_circle_v(c.end.pos, c.end.r, Color::GRAY);
-        }
-
-        show_alert(&mut d, alert_wrong_move.clone());
-        show_alert(&mut d, alert_no_player.clone());
-
+        //draw add player button
         let button_rect = Rectangle{
             x: (GRID_SIZE_PX + WIDGETS_PAD) as f32,
             y: 10.0,
@@ -351,19 +366,51 @@ fn main() {
             height: 40.0,
         };
         if d.gui_button(button_rect, "Add player") {
-            players.push(Player{
-                color: player_colors.next().unwrap(),
-            });
             player_turn_idx = match player_turn_idx{
                 Some(i) => { Some(i) }
                 None => Some(0)
             };
+            players.push(Player{
+                name: format!("player {}", players.len() + 1),
+                color: player_colors.next().unwrap(),
+                square_count: 0_usize,
+            });
         }
 
-        players.iter().enumerate().for_each(|(i, p)| d.draw_rectangle(720, (60 + i * 30) as i32, 20, 20, p.color.0));
+        //draw players colors
+        players
+            .iter()
+            .enumerate()
+            .for_each(|(i, p)| {
+                let y_pos = (60 + i * 30) as i32;
+
+                let counter_text = &p.square_count.to_string();
+                println!("player count {}", p.square_count);
+                let counter_size = d.measure_text(counter_text, FONT_SIZE);
+
+                d.draw_text     (counter_text, 720, y_pos, FONT_SIZE, Color::BLACK);
+                d.draw_rectangle(counter_size + INLINE_PAD + 720, y_pos, PLAYER_COLOR_REC_SIZE, PLAYER_COLOR_REC_SIZE, p.color.0);
+                d.draw_text     (&p.name, counter_size + PLAYER_COLOR_REC_SIZE + INLINE_PAD * 2 + 720, y_pos, FONT_SIZE, Color::BLACK);
+            });
+
+        //draw current turn player indicator
         if let Some(p_idx)= player_turn_idx{
-            d.draw_circle(750, (70 + p_idx * 30) as i32, 5.0, Color::BLACK);
+            // d.draw_circle(750, (70 + p_idx * 30) as i32, 5.0, Color::BLACK);
+            let rec = Rectangle{
+                x: 715.0,
+                y: (55 + p_idx * 30) as f32,
+                width: (65 + d.measure_text(&players[p_idx].name, 20)) as f32,
+                height: 30.0,
+            };
+            d.draw_rectangle_lines_ex(rec, 2.0, Color::BLACK);
         }
 
+        //blank board when no players
+        if player_turn_idx.is_none(){
+            d.draw_rectangle(0, 0, GRID_SIZE_PX, GRID_SIZE_PX, Color::new(0xFF, 0xFF, 0xFF, 0xAA));
+        }
+
+        show_alert(&mut d, alert_wrong_move.clone());
+        show_alert(&mut d, alert_no_player.clone());
     }
 }
